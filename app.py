@@ -1,7 +1,8 @@
 import streamlit as st
-import cv2
 import time
 from ultralytics import YOLO
+from PIL import Image
+import numpy as np
 
 # =========================
 #   LOAD MODEL
@@ -17,22 +18,15 @@ if "detected_text" not in st.session_state:
 if "last_detection_time" not in st.session_state:
     st.session_state.last_detection_time = 0
 
-if "camera_running" not in st.session_state:
-    st.session_state.camera_running = False
-
-
 # =========================
 #   PAGE UI
 # =========================
 st.title("🤟 Sign Language Recognition - Streamlit")
-
-st.write("Real-time Sign Language Detection using YOLO")
-
+st.write("Sign Language Detection using YOLO (Image Upload Mode)")
 
 # ---------- TEXT AREA ----------
 st.subheader("📌 Detected Text")
 st.write(st.session_state.detected_text)
-
 
 # ---------- BUTTONS ----------
 col1, col2, col3, col4, col5 = st.columns(5)
@@ -58,56 +52,29 @@ col5.download_button(
     mime="text/plain"
 )
 
-
-# ---------- CAMERA CONTROLS ----------
-st.subheader("🎥 Camera")
-
-start = st.button("Start Camera")
-stop = st.button("Stop Camera")
-
-
-if start:
-    st.session_state.camera_running = True
-
-if stop:
-    st.session_state.camera_running = False
-
-
-FRAME_WINDOW = st.image([])
-
 # =========================
-#   CAMERA LOOP
+#   IMAGE UPLOAD
 # =========================
-if st.session_state.camera_running:
+st.subheader("🖼 Upload Image")
+uploaded_file = st.file_uploader(
+    "Upload image containing hand sign",
+    type=["jpg", "png"]
+)
 
-    cap = cv2.VideoCapture(0)
+if uploaded_file:
+    img = Image.open(uploaded_file).convert("RGB")
+    img_array = np.array(img)
 
-    while st.session_state.camera_running:
+    results = model(img_array, conf=0.5)
 
-        ret, frame = cap.read()
-        if not ret:
-            st.write("Camera Not Detected")
-            break
+    now = time.time()
+    for box in results[0].boxes:
+        cls = int(box.cls[0])
+        conf = float(box.conf[0])
 
-        results = model(frame, conf=0.5)
+        if conf > 0.5 and now - st.session_state.last_detection_time > 1.5:
+            st.session_state.detected_text += chr(65 + cls)
+            st.session_state.last_detection_time = now
 
-        for result in results:
-            for box in result.boxes:
-                cls = int(box.cls[0])
-                conf = float(box.conf[0])
-
-                # Only accept confident detections
-                if conf > 0.5:
-                    now = time.time()
-
-                    # Anti-spam timing
-                    if now - st.session_state.last_detection_time > 1.5:
-                        st.session_state.detected_text += chr(65 + cls)
-                        st.session_state.last_detection_time = now
-
-        annotated = results[0].plot()
-        annotated = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
-
-        FRAME_WINDOW.image(annotated)
-
-    cap.release()
+    annotated = results[0].plot()
+    st.image(annotated, caption="Detection Result", use_column_width=True)
